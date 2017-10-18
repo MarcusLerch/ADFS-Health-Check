@@ -1,16 +1,5 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <ScriptConfiguration>
-  <Domain2Check>contoso10.com</Domain2Check>
-  <EventlogCheckDays>1</EventlogCheckDays>
-  <EventIDs>
-    <EventID>221</EventID>
-    <EventID>250</EventID>
-    <EventID>344</EventID>
-    <EventID>346</EventID>
-    <EventID>352</EventID>
-    <EventID>356</EventID>
-    <EventID>378</EventID>
-  </EventIDs>
   <MailSettings>
     <SendMail>0</SendMail>
     <SMTP-Server>mail.contoso10.com</SMTP-Server>
@@ -20,35 +9,49 @@
       <Recipient>admin@contoso10.com</Recipient>
     </RecipientList>
   </MailSettings>
-  <FarmURL>corp.sts.microsoft.com</FarmURL>
-  <CheckUrls>
-    <URL>
+  <WebSettings>
+    <FarmURL>corp.sts.microsoft.com</FarmURL>
+    <CheckUrls>
+      <URL>
         <URLPath>adfs/ls/IdpInitiatedSignon.aspx</URLPath>
         <URLType>SignonPage</URLType>
-    </URL>
-    <URL>
+      </URL>
+      <URL>
         <URLPath>adfs/fs/federationserverservice.asmx</URLPath>
         <URLType>WebServiceXML</URLType>
-    </URL>
-    <URL>
+      </URL>
+      <URL>
         <URLPath>adfs/services/trust/mex</URLPath>
         <URLType>TrustXML</URLType>
-    </URL>
-    <URL>
+      </URL>
+      <URL>
         <URLPath>federationmetadata/2007-06/federationmetadata.xml</URLPath>
         <URLType>MetadataXML</URLType>
-    </URL>
-  </CheckUrls>
+      </URL>
+    </CheckUrls>
+  </WebSettings>
+  <EventLogSettings>
+    <CheckDays>1</CheckDays>
+    <EventIDs>
+      <EventID>221</EventID>
+      <EventID>250</EventID>
+      <EventID>344</EventID>
+      <EventID>346</EventID>
+      <EventID>352</EventID>
+      <EventID>356</EventID>
+      <EventID>378</EventID>
+    </EventIDs>
+  </EventLogSettings>
   <Servers>
     <ServerName>server01.contoso10.com</ServerName>
     <ServerName>server02.contoso10.com</ServerName>
     <ServerName>server03.contoso10.com</ServerName>
   </Servers>
-  <CheckService>
+  <Services>
     <Service>
       <ServiceName>adfssrv</ServiceName>
       <StartMode>Auto</StartMode>
       <State>Running</State>
     </Service>
-  </CheckService>
+  </Services>
 </ScriptConfiguration>

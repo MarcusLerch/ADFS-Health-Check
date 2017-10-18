@@ -159,25 +159,25 @@ $Subject = $configuration.ScriptConfiguration.MailSettings.Subject
 Log2File -log $LogFile -text "Mail subject"
 Log2File -log $LogFile -text "`t - $Subject"
 
-[int]$EventlogCheckDays = $configuration.ScriptConfiguration.EventlogCheckDays 
+[int]$EventlogCheckDays = $configuration.ScriptConfiguration.EventLogSettings.CheckDays 
 Log2File -log $LogFile -text "Number of days for Eventlog reporting" 
 Log2File -log $LogFile -text "`t - $EventlogCheckDays" 
 [String]$EventlogCheckDays = $EventlogCheckDays * -1 
 
 $CheckEventIDs = @()
 Log2File -log $LogFile -text "Reading EventIDs to check"
-foreach ($CheckEventID in $configuration.ScriptConfiguration.EventIDs.EventID){
+foreach ($CheckEventID in $configuration.ScriptConfiguration.EventLogSettings.EventIDs.EventID){
     Log2File -log $LogFile -text "`t - $($CheckEventID)"
     $CheckEventIDs += $CheckEventID
 }
 
-$ADFSFarmURL = $configuration.ScriptConfiguration.FarmURL
+$ADFSFarmURL = $configuration.ScriptConfiguration.WebSettings.FarmURL
 Log2File -log $LogFile -text "ADFS Farm URL"
 Log2File -log $LogFile -text "`t - $ADFSFarmURL"
 
 $CheckURLs = @{}
 Log2File -log $LogFile -text "Reading URLs to check"
-foreach ($ReadURL in $configuration.ScriptConfiguration.CheckURLs.URL){
+foreach ($ReadURL in $configuration.ScriptConfiguration.WebSettings.CheckURLs.URL){
     Log2File -log $LogFile -text "`t - $($ReadURL.URLType)"
     $CheckURLs.Add($ReadURL.URLType,$ReadURL.URLPath)
 }
@@ -191,7 +191,7 @@ foreach ($CheckServer in $configuration.ScriptConfiguration.Servers.ServerName){
 
 $CheckServices = @()
 Log2File -log $LogFile -text "Reading services to check"
-foreach ($ReadService in $configuration.ScriptConfiguration.CheckService.Service){
+foreach ($ReadService in $configuration.ScriptConfiguration.Services.Service){
     Log2File -log $LogFile -text "`t - $($ReadService.ServiceName)"
     $htService = @{'ServiceName'=$ReadService.ServiceName;'StartMode'=$ReadService.StartMode;'State'=$ReadService.State}
     $CheckServices += New-Object PSObject -Property $htService
