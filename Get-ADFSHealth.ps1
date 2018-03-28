@@ -44,8 +44,9 @@ Write-Verbose $text
 function Get-SSLCert {
     param(
         [string]$ServerUrl,
-        [int]$ServerSslPort = 443
+        [int]$ServerSslPort
     )
+    if(!($ServerSslPort)){$ServerSslPort = 443}
     $tcpClient = New-Object Net.Sockets.TcpClient($ServerUrl,$ServerSslPort)
     if(!$tcpClient) {
         Log2File -log $LogFile -text ("Error connecting to: {0} on port: {1}" -f $ServerUrl,$ServerSslPort)
@@ -60,13 +61,15 @@ function Get-SSLCert {
         $SslCert
     }
 }
+
 function Get-ADFSCertificate{
     param(
         [string]$ServerUrl,
-        [int]$ServerSslPort = 443,
+        [int]$ServerSslPort,
         [string]$FederationDocPath = "/federationmetadata/2007-06/federationmetadata.xml"
     )
-    $FederationDocUrl = ('https://{0}:{1}/{2}' -f $ServerUrl, $ServerSslPort, $FederationDocPath) 
+    if($ServerSslPort){$SslPort = ":$ServerSslPort"}
+    $FederationDocUrl = ('https://{0}{1}/{2}' -f $ServerUrl, $sslPort, $FederationDocPath) 
     $FederationCerts = @{}
     Log2File -log $LogFile -text ("Getting Federation Document from {0}" -f $FederationDocUrl)
     try {
@@ -175,6 +178,10 @@ $ADFSFarmURL = $configuration.ScriptConfiguration.WebSettings.FarmURL
 Log2File -log $LogFile -text "ADFS Farm URL"
 Log2File -log $LogFile -text "`t - $ADFSFarmURL"
 
+$ADFSFarmSSLPort = $configuration.ScriptConfiguration.WebSettings.SSLPort
+Log2File -log $LogFile -text "ADFS Farm SSLPort"
+Log2File -log $LogFile -text "`t - $ADFSFarmSSLPort"
+
 $CheckURLs = @{}
 Log2File -log $LogFile -text "Reading URLs to check"
 foreach ($ReadURL in $configuration.ScriptConfiguration.WebSettings.CheckURLs.URL){
@@ -201,12 +208,12 @@ foreach ($ReadService in $configuration.ScriptConfiguration.Services.Service){
 #region Main
 
 Log2File -log $LogFile -text "Starting checks of ADFS Farm"
-$sslWebCert = Get-SSLCert -ServerUrl $ADFSFarmURL
+$sslWebCert = Get-SSLCert -ServerUrl $ADFSFarmURL -ServerSslPort $ADFSFarmSSLPort
 Log2File -log $LogFile -text ("Found SSL certificate with subject : {0}" -f $sslWebCert.Subject)
 Log2File -log $LogFile -text ("      SSL certificate valid from   : {0}" -f $sslWebCert.NotBefore)
 Log2File -log $LogFile -text ("      SSL certificate valid until  : {0}" -f $sslWebCert.NotAfter)
-Write-verbose ("SSL Certificate found : {0}" -f$sslWebCert.Subject) 
-$ADFSCerts = Get-ADFSCertificate -ServerUrl $ADFSFarmURL -FederationDocPath $CheckURLs['MetadataXML']
+
+$ADFSCerts = Get-ADFSCertificate -ServerUrl $ADFSFarmURL -FederationDocPath $CheckURLs['MetadataXML'] -ServerSslPort $ADFSFarmSSLPort
 foreach($ADFSCert in $ADFSCerts){
     switch ($ADFSCert.KeyUsage){
         {$_ -contains 'signing'}{
@@ -224,8 +231,23 @@ foreach($ADFSCert in $ADFSCerts){
         default {Log2File -log $LogFile -text ("Found additional ADFS certificate with subject {0}" -f $ADFSCert.Subject)}
     }
 }
-$ADFSSigningCert
-$ADFSEncryptionCert
+
+#region Check URLs and export result
+$webCheckResults = @()
+if($ADFSFarmSSLPort){$SSLport = ":$ADFSFarmSSLPort"}
+foreach($CheckURL in $CheckURLs.GetEnumerator()){
+    $webCheck = [ordered]@{}
+    $webCheck.Type = $CheckURL.Name
+    $webCheck.URL = ('https://{0}{1}/{2}' -f $ADFSFarmURL, $SSLport, $CheckURL.Value) 
+    Log2File -log $LogFile -text ("Checking {0} Url {1}" -f $CheckURL.Name,$webCheck.URL)
+    $HttpResponse = Invoke-WebRequest -Uri $webCheck.URL -UseBasicParsing
+    $webCheck.StatusCode = $HttpResponse.StatusCode
+    $webCheck.StatusDescription = $HttpResponse.StatusDescription
+    $webCheckObject = New-Object psobject -Property $webCheck
+    $webCheckResults += $webCheckObject
+}
+$webCheckResults | Export-Csv -Path "$LogFilePath\WebCheckResults.csv" -Delimiter ';' -NoTypeInformation
+#endregion
 
 #region Create ScriptBlock to run on ADFS server
 Log2File -log $LogFile -text "Creating script block for ADFS server checks"
@@ -238,8 +260,8 @@ for($i=0; $i -lt $CheckEventIDs.count; $i++){
     }
 }
 $EventIDQuery += ")"
-Write-Verbose $EventIDQuery
-$TimeToCheck = 86400000 * 7
+
+$TimeToCheck = 86400000 * [int]$EventlogCheckDays
 $filterXML = @"
 <QueryList>
   <Query Id="0" Path="AD FS/Admin">
@@ -247,6 +269,7 @@ $filterXML = @"
   </Query>
 </QueryList>
 "@
+Write-Verbose $filterXML
 
 $SBText = @'
 $ADFS_HealthInfo = [ordered]@{}
@@ -254,7 +277,7 @@ $ADFS_HealthInfo.Computername = $env:COMPUTERNAME
 $ADFS_HealthInfo.OSDirFreeSpace = (Get-WmiObject -Query "SELECT FreeSpace FROM win32_logicaldisk WHERE DeviceID = 'C:'").FreeSpace
 $ADFS_HealthInfo.UnexpectedShutdown = @(Get-Eventlog 'System' -After (get-date).AddDays($using:EventlogCheckDays) -EntryType Error -ErrorAction SilentlyContinue | Where-Object {$_.EventID -eq 6008})
 $ADFS_HealthInfo.UnexpectedShutdownCount = $ADFS_HealthInfo.UnexpectedShutdown.Count
-$ADFS_HealthInfo.EventCollection = @(Get-WinEvent -FilterXml $using:filterXML) 
+$ADFS_HealthInfo.EventCollection = @(Get-WinEvent -FilterXml $using:filterXML -ErrorAction SilentlyContinue) 
 $ADFS_HealthInfo.EventCollectionCount = $ADFS_HealthInfo.EventCollection.Count 
 $ServicesChecked = @()
 foreach ($Service2Check in $using:CheckServices){
@@ -296,4 +319,3 @@ Log2File -log $LogFile -text "Collecting information from the ADFS servers"
 $results
 
 #endregion
-

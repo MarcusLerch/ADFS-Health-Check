@@ -11,6 +11,7 @@
   </MailSettings>
   <WebSettings>
     <FarmURL>corp.sts.microsoft.com</FarmURL>
+    <SSLPort></SSLPort>
     <CheckUrls>
       <URL>
         <URLPath>adfs/ls/IdpInitiatedSignon.aspx</URLPath>
