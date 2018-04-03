@@ -24,12 +24,13 @@ advised of the possibility of such damages.
 [cmdletBinding(SupportsShouldProcess=$true)]
 param(
     [String]$ConfigFile="config.xml",
+    [pscredential]$Credential,
     [String]$LogDir
 )
 
 #endregion
 
-[String]$ScriptVersion = "0.0.1"
+[String]$ScriptVersion = "1.0.0"
 
 #region Functions
 function Log2File{
@@ -243,6 +244,7 @@ foreach($CheckURL in $CheckURLs.GetEnumerator()){
     $HttpResponse = Invoke-WebRequest -Uri $webCheck.URL -UseBasicParsing
     $webCheck.StatusCode = $HttpResponse.StatusCode
     $webCheck.StatusDescription = $HttpResponse.StatusDescription
+    New-Variable -Name ($CheckURL.Name) -Value ($HttpResponse.StatusDescription)
     $webCheckObject = New-Object psobject -Property $webCheck
     $webCheckResults += $webCheckObject
 }
@@ -274,7 +276,7 @@ Write-Verbose $filterXML
 $SBText = @'
 $ADFS_HealthInfo = [ordered]@{}
 $ADFS_HealthInfo.Computername = $env:COMPUTERNAME
-$ADFS_HealthInfo.OSDirFreeSpace = (Get-WmiObject -Query "SELECT FreeSpace FROM win32_logicaldisk WHERE DeviceID = 'C:'").FreeSpace
+$ADFS_HealthInfo.OSDirFreeSpace = (Get-WmiObject -Query "SELECT FreeSpace FROM win32_logicaldisk WHERE DeviceID = 'C:'").FreeSpace /1GB
 $ADFS_HealthInfo.UnexpectedShutdown = @(Get-Eventlog 'System' -After (get-date).AddDays($using:EventlogCheckDays) -EntryType Error -ErrorAction SilentlyContinue | Where-Object {$_.EventID -eq 6008})
 $ADFS_HealthInfo.UnexpectedShutdownCount = $ADFS_HealthInfo.UnexpectedShutdown.Count
 $ADFS_HealthInfo.EventCollection = @(Get-WinEvent -FilterXml $using:filterXML -ErrorAction SilentlyContinue) 
@@ -313,9 +315,142 @@ $SB = [ScriptBlock]::Create($SBText)
 
 #region Run checks on reachable DCs 
 Log2File -log $LogFile -text "Collecting information from the ADFS servers" 
-#$results = @(Invoke-Command -ComputerName $CheckServers -ScriptBlock $SB) 
+if ($Credential){
+    $results = @(Invoke-Command -ComputerName $CheckServers -ScriptBlock $SB -Credential $Credential) 
+}
+else{
+    $results = @(Invoke-Command -ComputerName $CheckServers -ScriptBlock $SB) 
+}
 #endregion 
 
-$results
+$FarmResults = @()
+$FarmServices = @()
+$CertErrors = 0
+$ServiceErrors = 0
+$EventCount = 0
+$UXShutdowns = 0
+foreach($result in $results){
+    $FarmServer = [ordered]@{}
+    $FarmServer.Name = $result.Computername
+    $FarmServer.OSDiskFreeSpace = $result.OSDirFreeSpace
+    $FarmServer.UnexpectedShutdown = $result.UnexpectedShutdownCount
+    $UXShutdowns += $result.UnexpectedShutdownCount
+    $FarmServer.Events = $result.EventCollectionCount
+    $EventCount += $result.EventCollectionCount
+    $FarmServer.ServiceError = $false
+    foreach($service in $result.CheckedServices){
+        $FarmService = [ordered]@{}
+        $FarmService.Computername = $service.Computername
+        $FarmService.ServiceName = $service.ServiceName
+        $FarmService.StartMode = $service.StartMode
+        $FarmService.State = $service.State
+        $FarmService.CheckResult = $service.CheckResult
+        if($service.CheckResult -ne "OK"){
+            $FarmServer.ServiceError = $true
+            $ServiceErrors++
+        }
+        $FarmServiceObject = New-Object psobject -Property $FarmService
+        $FarmServices += $FarmServiceObject
+    }
+    $FarmServer.CertificateError = $false
+    foreach($ServerCert in $result.CertificatesChecked){
+        if($ServerCert.CheckResult -ne "Success"){
+            $FarmServer.CertificateError = $true
+            $CertErrors++
+        }
+    }
+    $FarmServerObject = New-Object psobject -Property $FarmServer
+    $FarmResults += $FarmServerObject
+}
+$FarmResults | Export-Csv -Path "$LogFilePath\$rundatestring-ADFSFarmHealth.csv" -NoTypeInformation -Delimiter ";" -Force
+$FarmServices | Export-Csv -Path "$LogFilePath\$rundatestring-ServiceCheck.csv" -NoTypeInformation -Delimiter ";" -Force
 
+#region generating mail
+Log2File -log $LogFile -text "Generating report"
+Log2File -log $LogFile -text "Reading mail body template from $Scriptpath\MailBody.html"
+[string]$MailBody = Get-Content -Path "$Scriptpath\MailBody.html"
+
+$MailBody = $MailBody.Replace("___ADFSFARM___",$ADFSFarmURL)
+$MailBody = $MailBody.Replace("___SIGNON___",$SignonPage)
+$MailBody = $MailBody.Replace("___WEBSERVICE___",$WebServiceXML)
+$MailBody = $MailBody.Replace("___TRUST___",$TrustXML)
+$MailBody = $MailBody.Replace("___METADATA___",$MetadataXML)
+$MailBody = $MailBody.Replace("___SIGNING___",$ADFSSigningCert.NotAfter)
+$MailBody = $MailBody.Replace("___ENCRYPTION___",$ADFSEncryptionCert.NotAfter)
+$MailBody = $MailBody.Replace("___SSL___",$sslWebCert.NotAfter)
+$MailBody = $MailBody.Replace("___CERTERRORS___",$CertErrors)
+$MailBody = $MailBody.Replace("___SERVICEERRORS___",$ServiceErrors)
+$MailBody = $MailBody.Replace("___EVENTCOUNT___",$EventCount)
+$MailBody = $MailBody.Replace("___SHUTDOWNS___",$UXShutdowns)
+
+switch ($SignonPage){
+    {"OK"} {$MailBody = $MailBody.Replace("___SIGNONCOLOR___",$HTMLGreen); break}
+    default {$MailBody = $MailBody.Replace("___SIGNONCOLOR___",$HTMLRed)}
+}
+switch ($WebServiceXML){
+    {"OK"} {$MailBody = $MailBody.Replace("___WEBCOLOR___",$HTMLGreen); break}
+    default {$MailBody = $MailBody.Replace("___WEBCOLOR___",$HTMLRed)}
+}
+switch ($TrustXML){
+    {"OK"} {$MailBody = $MailBody.Replace("___TRUSTCOLOR___",$HTMLGreen); break}
+    default {$MailBody = $MailBody.Replace("___TRUSTCOLOR___",$HTMLRed)}
+}
+switch ($MetadataXML){
+    {"OK"} {$MailBody = $MailBody.Replace("___METACOLOR___",$HTMLGreen); break}
+    default {$MailBody = $MailBody.Replace("___METACOLOR___",$HTMLRed)}
+}
+switch ($ADFSSigningCert.NotAfter){
+    {$_ -gt (Get-Date).AddMonths(-1)} {$MailBody = $MailBody.Replace("___SIGNCOLOR___",$HTMLGreen); break}
+    {$_ -gt (Get-Date).AddDays(-14)} {$MailBody = $MailBody.Replace("___SIGNCOLOR___",$HTMLYellow); break}
+    default {$MailBody = $MailBody.Replace("___SIGNCOLOR___",$HTMLRed)}
+}
+switch ($ADFSEncryptionCert.NotAfter){
+    {$_ -gt (Get-Date).AddMonths(-1)} {$MailBody = $MailBody.Replace("___ENCRYPTCOLOR___",$HTMLGreen); break}
+    {$_ -gt (Get-Date).AddDays(-14)} {$MailBody = $MailBody.Replace("___ENCRYPTCOLOR___",$HTMLYellow); break}
+    default {$MailBody = $MailBody.Replace("___ENCRYPTCOLOR___",$HTMLRed)}
+}
+switch ($sslWebCert.NotAfter){
+    {$_ -gt (Get-Date).AddMonths(-2)} {$MailBody = $MailBody.Replace("___SSLCOLOR___",$HTMLGreen); break}
+    {$_ -gt (Get-Date).AddMonths(-1)} {$MailBody = $MailBody.Replace("___SSLCOLOR___",$HTMLYellow); break}
+    default {$MailBody = $MailBody.Replace("___SSLCOLOR___",$HTMLRed)}
+}
+switch ($CertErrors){
+    {$_ -gt 0} {$MailBody = $MailBody.Replace("___CERTCOLOR___",$HTMLRed); break}
+    default {$MailBody = $MailBody.Replace("___CERTCOLOR___",$HTMLGreen)}
+}
+switch ($ServiceErrors){
+    {$_ -gt 1} {$MailBody = $MailBody.Replace("___SRVCOLOR___",$HTMLRed); break}
+    {$_ -gt 0} {$MailBody = $MailBody.Replace("___SRVCOLOR___",$HTMLYellow); break}
+    default {$MailBody = $MailBody.Replace("___SRVCOLOR___",$HTMLGreen)}
+}
+switch ($EventCount){
+    {$_ -gt 5} {$MailBody = $MailBody.Replace("___EVENTCOLOR___",$HTMLRed); break}
+    {$_ -gt 0} {$MailBody = $MailBody.Replace("___EVENTCOLOR___",$HTMLYellow); break}
+    default {$MailBody = $MailBody.Replace("___EVENTCOLOR___",$HTMLGreen)}
+}
+switch ($UXShutdowns){
+    {$_ -gt 1} {$MailBody = $MailBody.Replace("___SHUTDOWNCOLOR___",$HTMLRed); break}
+    {$_ -gt 0} {$MailBody = $MailBody.Replace("___SHUTDOWNCOLOR___",$HTMLYellow); break}
+    default {$MailBody = $MailBody.Replace("___SHUTDOWNCOLOR___",$HTMLGreen)}
+}
+
+$MailBody = $MailBody.Replace("___SCRIPTNAME___",$MyInvocation.MyCommand.Path)
+$MailBody = $MailBody.Replace("___SCRIPTVERSION___",$ScriptVersion)
+$MailBody = $MailBody.Replace("___SERVERNAME___",$env:COMPUTERNAME)
+
+$Attachements = Get-ChildItem -Path $LogFilePath | ForEach-Object {$_.FullName}
+if($sendMail){
+Log2File -log $LogFile -text "Sending mail"
+Send-MailMessage -BodyAsHtml -Body $MailBody `
+            -Attachments $Attachements `
+            -To $recipients `
+            -From $Sender `
+            -SmtpServer $smtpserver `
+            -Subject $Subject 
+}
+$MailBody | Out-File -FilePath "$LogFilePath\SentMail.html" 
+
+#endregion
+Log2File -log $LogFile -text "Ended"
+Log2File -log $LogFile -text $Spacer
 #endregion

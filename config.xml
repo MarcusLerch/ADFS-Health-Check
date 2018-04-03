@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <ScriptConfiguration>
   <MailSettings>
     <SendMail>0</SendMail>
@@ -10,7 +10,7 @@
     </RecipientList>
   </MailSettings>
   <WebSettings>
-    <FarmURL>corp.sts.microsoft.com</FarmURL>
+    <FarmURL>adfs.contoso10.com</FarmURL>
     <SSLPort></SSLPort>
     <CheckUrls>
       <URL>
@@ -32,7 +32,7 @@
     </CheckUrls>
   </WebSettings>
   <EventLogSettings>
-    <CheckDays>1</CheckDays>
+    <CheckDays>7</CheckDays>
     <EventIDs>
       <EventID>221</EventID>
       <EventID>250</EventID>
@@ -40,13 +40,14 @@
       <EventID>346</EventID>
       <EventID>352</EventID>
       <EventID>356</EventID>
+	  <EventID>364</EventID>
       <EventID>378</EventID>
     </EventIDs>
   </EventLogSettings>
   <Servers>
-    <ServerName>server01.contoso10.com</ServerName>
-    <ServerName>server02.contoso10.com</ServerName>
-    <ServerName>server03.contoso10.com</ServerName>
+    <ServerName>sv02.contoso10.com</ServerName>
+    <ServerName>sv03.contoso10.com</ServerName>
+    <ServerName>sv04.contoso10.com</ServerName>
   </Servers>
   <Services>
     <Service>
