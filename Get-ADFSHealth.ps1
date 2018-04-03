@@ -30,7 +30,7 @@ param(
 
 #endregion
 
-[String]$ScriptVersion = "1.0.0"
+[String]$ScriptVersion = "1.1.1"
 
 #region Functions
 function Log2File{
@@ -74,12 +74,12 @@ function Get-ADFSCertificate{
     $FederationCerts = @{}
     Log2File -log $LogFile -text ("Getting Federation Document from {0}" -f $FederationDocUrl)
     try {
-    $FederationDocXml = [xml](Invoke-WebRequest -Uri $FederationDocUrl -UseBasicParsing).content
+    $Global:FederationDocXml = [xml](Invoke-WebRequest -Uri $FederationDocUrl -UseBasicParsing).content
     }
     catch {
     Log2File -log $LogFile -text ("Error: Could not get federation xml document")
     }
-    $keyDescriptors = $FederationDocXml.GetElementsByTagName('KeyDescriptor')
+    $keyDescriptors = $Global:FederationDocXml.GetElementsByTagName('KeyDescriptor')
     $FederationCerts = @{}
     foreach ($keyDescriptor in $keyDescriptors){
         try{
@@ -215,21 +215,30 @@ Log2File -log $LogFile -text ("      SSL certificate valid from   : {0}" -f $ssl
 Log2File -log $LogFile -text ("      SSL certificate valid until  : {0}" -f $sslWebCert.NotAfter)
 
 $ADFSCerts = Get-ADFSCertificate -ServerUrl $ADFSFarmURL -FederationDocPath $CheckURLs['MetadataXML'] -ServerSslPort $ADFSFarmSSLPort
+$CertCounter = New-Object System.Object | Select-Object -Property Signing,Encryption,Other
+$CertCounter.Signing = 0
+$CertCounter.Encryption = 0
+$CertCounter.Other = 0
 foreach($ADFSCert in $ADFSCerts){
     switch ($ADFSCert.KeyUsage){
         {$_ -contains 'signing'}{
             $ADFSSigningCert = $ADFSCert
+            $CertCounter.Signing++
             Log2File -log $LogFile -text ("Found ADFS signing certificate with subject : {0}" -f $ADFSCert.Subject)
             Log2File -log $LogFile -text ("      ADFS signing certificate valid from   : {0}" -f $ADFSCert.NotBefore)
             Log2File -log $LogFile -text ("      ADFS signing certificate valid until  : {0}" -f $ADFSCert.notafter)
         }
         {$_ -contains 'encryption'}{
             $ADFSEncryptionCert = $ADFSCert
+            $CertCounter.Encryption++
             Log2File -log $LogFile -text ("Found ADFS encryption certificate with subject : {0}" -f $ADFSCert.Subject)
             Log2File -log $LogFile -text ("      ADFS encryption certificate valid from   : {0}" -f $ADFSCert.NotBefore)
             Log2File -log $LogFile -text ("      ADFS encryption certificate valid until  : {0}" -f $ADFSCert.NotAfter)
         }
-        default {Log2File -log $LogFile -text ("Found additional ADFS certificate with subject {0}" -f $ADFSCert.Subject)}
+        default {
+            $CertCounter.Other++
+            Log2File -log $LogFile -text ("Found additional ADFS certificate with subject {0}" -f $ADFSCert.Subject)
+        }
     }
 }
 
@@ -432,6 +441,13 @@ switch ($UXShutdowns){
     {$_ -gt 1} {$MailBody = $MailBody.Replace("___SHUTDOWNCOLOR___",$HTMLRed); break}
     {$_ -gt 0} {$MailBody = $MailBody.Replace("___SHUTDOWNCOLOR___",$HTMLYellow); break}
     default {$MailBody = $MailBody.Replace("___SHUTDOWNCOLOR___",$HTMLGreen)}
+}
+if(($CertCounter.Signing -gt 1) -or ($CertCounter.Encryption -gt 1)){
+    $MailBody = $MailBody.Replace("___ROLLOVER___","<br>!!! Achtung, die ADFS Farm befindet sich im Zertifikats Rollover Prozess !!!<br>!!! Bitte informieren sie die beteiligten Stellen &uuml;ber die neuen Zertifkate !!!")
+    $Global:FederationDocXml | Out-File -FilePath "$LogFilePath\$rundatestring-FederationMetadata.xml" -Force
+}
+else{
+    $MailBody = $MailBody.Replace("___ROLLOVER___","")
 }
 
 $MailBody = $MailBody.Replace("___SCRIPTNAME___",$MyInvocation.MyCommand.Path)
