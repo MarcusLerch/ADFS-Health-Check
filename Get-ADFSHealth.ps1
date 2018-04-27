@@ -30,7 +30,7 @@ param(
 
 #endregion
 
-[String]$ScriptVersion = "1.1.1"
+[String]$ScriptVersion = "1.2.0"
 
 #region Functions
 function Log2File{
@@ -146,6 +146,14 @@ foreach ($recipient in $configuration.ScriptConfiguration.MailSettings.recipient
     Log2File -log $LogFile -text "`t - $($recipient.recipient)"
     $recipients += $recipient.recipient
 }
+
+$MetaDataRecipientList = @()
+Log2File -log $LogFile -text "Reading recipients for metadata mail"
+foreach ($recipient in $configuration.ScriptConfiguration.MailSettings.MetaDataRecipientList){
+    Log2File -log $LogFile -text "`t - $($recipient.recipient)"
+    $MetaDataRecipientList += $recipient.recipient
+}
+
 
 [bool][int]$sendMail = $configuration.ScriptConfiguration.MailSettings.SendMail
 Log2File -log $LogFile -text "SendMail:"
@@ -443,8 +451,20 @@ switch ($UXShutdowns){
     default {$MailBody = $MailBody.Replace("___SHUTDOWNCOLOR___",$HTMLGreen)}
 }
 if(($CertCounter.Signing -gt 1) -or ($CertCounter.Encryption -gt 1)){
+    [string]$MetadataMailBody = Get-Content -Path "$Scriptpath\MetadataMailBody.html"
     $MailBody = $MailBody.Replace("___ROLLOVER___","<br>!!! Achtung, die ADFS Farm befindet sich im Zertifikats Rollover Prozess !!!<br>!!! Bitte informieren sie die beteiligten Stellen &uuml;ber die neuen Zertifkate !!!")
     $Global:FederationDocXml | Out-File -FilePath "$LogFilePath\$rundatestring-FederationMetadata.xml" -Force
+    $MetadataMailBody = $MetadataMailBody.Replace("___ADFSFARM___",$ADFSFarmURL)
+    $MetadataMailBody = $MetadataMailBody.Replace("___SCRIPTNAME___",$MyInvocation.MyCommand.Path)
+    $MetadataMailBody = $MetadataMailBody.Replace("___SCRIPTVERSION___",$ScriptVersion)
+    $MetadataMailBody = $MetadataMailBody.Replace("___SERVERNAME___",$env:COMPUTERNAME)
+    Log2File -log $LogFile -text "Sending metadata mail"
+    Send-MailMessage -BodyAsHtml -Body $MetadataMailBody `
+                -Attachments "$LogFilePath\$rundatestring-FederationMetadata.xml" `
+                -To $MetaDataRecipientList `
+                -From $Sender `
+                -SmtpServer $smtpserver `
+                -Subject $Subject 
 }
 else{
     $MailBody = $MailBody.Replace("___ROLLOVER___","")
@@ -455,6 +475,7 @@ $MailBody = $MailBody.Replace("___SCRIPTVERSION___",$ScriptVersion)
 $MailBody = $MailBody.Replace("___SERVERNAME___",$env:COMPUTERNAME)
 
 $Attachements = Get-ChildItem -Path $LogFilePath | ForEach-Object {$_.FullName}
+
 if($sendMail){
 Log2File -log $LogFile -text "Sending mail"
 Send-MailMessage -BodyAsHtml -Body $MailBody `
@@ -465,6 +486,7 @@ Send-MailMessage -BodyAsHtml -Body $MailBody `
             -Subject $Subject 
 }
 $MailBody | Out-File -FilePath "$LogFilePath\SentMail.html" 
+$MetadataMailBody | Out-File -FilePath "$LogFilePath\SentMetadataMail.html" 
 
 #endregion
 Log2File -log $LogFile -text "Ended"
