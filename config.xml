@@ -8,6 +8,9 @@
     <RecipientList>
       <Recipient>admin@contoso10.com</Recipient>
     </RecipientList>
+    <MetaDataRecipientList>
+      <Recipient>FederatioTrust.Owner@fabrikam.com</Recipient>
+    </MetaDataRecipientList>
   </MailSettings>
   <WebSettings>
     <FarmURL>adfs.contoso10.com</FarmURL>
