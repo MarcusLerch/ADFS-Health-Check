@@ -1,4 +1,6 @@
+
 # ADFS-Health-Check
+
 Script to check some basic services, events and the certificates on ADFS Servers
 
 This script collects information from one or more ADFS servers and rates the health of the farm based on this information.

@@ -63,7 +63,7 @@ function Get-SSLCert {
     }
 }
 
-function Get-ADFSCertificate{
+function Get-ADFSCertificateFromMetadata{
     param(
         [string]$ServerUrl,
         [int]$ServerSslPort,
@@ -222,7 +222,7 @@ Log2File -log $LogFile -text ("Found SSL certificate with subject : {0}" -f $ssl
 Log2File -log $LogFile -text ("      SSL certificate valid from   : {0}" -f $sslWebCert.NotBefore)
 Log2File -log $LogFile -text ("      SSL certificate valid until  : {0}" -f $sslWebCert.NotAfter)
 
-$ADFSCerts = Get-ADFSCertificate -ServerUrl $ADFSFarmURL -FederationDocPath $CheckURLs['MetadataXML'] -ServerSslPort $ADFSFarmSSLPort
+$ADFSCerts = Get-ADFSCertificateFromMetadata -ServerUrl $ADFSFarmURL -FederationDocPath $CheckURLs['MetadataXML'] -ServerSslPort $ADFSFarmSSLPort
 $CertCounter = New-Object System.Object | Select-Object -Property Signing,Encryption,Other
 $CertCounter.Signing = 0
 $CertCounter.Encryption = 0
@@ -310,8 +310,22 @@ foreach ($Service2Check in $using:CheckServices){
     $ServicesChecked += New-Object PSObject -Property $ServiceResult
 }
 $ADFS_HealthInfo.CheckedServices = $ServicesChecked
+New-Object PSObject -Property $ADFS_HealthInfo
+'@
+
+$SB = [ScriptBlock]::Create($SBText)
+#endregion
+
+#region Run checks on farmservers
+Log2File -log $LogFile -text "Collecting information from the ADFS servers" 
+if ($Credential){
+    $results = @(Invoke-Command -ComputerName $CheckServers -ScriptBlock $SB -Credential $Credential) 
+}
+else{
+    $results = @(Invoke-Command -ComputerName $CheckServers -ScriptBlock $SB) 
+}
 $CertificatesChecked = @()
-foreach ($ADFSCert in $using:ADFSCerts){
+foreach ($ADFSCert in $ADFSCerts){
     $CheckCert = New-Object PSObject | Select-Object -Property 'KeyUsage','Certificate','CheckResult'
     $CheckCert.KeyUsage = $ADFSCert.KeyUsage
     $CheckCert.Certificate = Get-AdfsCertificate | Where-Object {$_.Thumbprint -eq $ADFSCert.Thumbprint}
@@ -323,21 +337,8 @@ foreach ($ADFSCert in $using:ADFSCerts){
     }
     $CertificatesChecked += $CheckCert
 }
-$ADFS_HealthInfo.CertificatesChecked = $CertificatesChecked
-New-Object PSObject -Property $ADFS_HealthInfo
-'@
+#$ADFS_HealthInfo.CertificatesChecked = $CertificatesChecked
 
-$SB = [ScriptBlock]::Create($SBText)
-#endregion
-
-#region Run checks on reachable DCs 
-Log2File -log $LogFile -text "Collecting information from the ADFS servers" 
-if ($Credential){
-    $results = @(Invoke-Command -ComputerName $CheckServers -ScriptBlock $SB -Credential $Credential) 
-}
-else{
-    $results = @(Invoke-Command -ComputerName $CheckServers -ScriptBlock $SB) 
-}
 #endregion 
 
 $FarmResults = @()
@@ -370,7 +371,7 @@ foreach($result in $results){
         $FarmServices += $FarmServiceObject
     }
     $FarmServer.CertificateError = $false
-    foreach($ServerCert in $result.CertificatesChecked){
+    foreach($ServerCert in $CertificatesChecked){
         if($ServerCert.CheckResult -ne "Success"){
             $FarmServer.CertificateError = $true
             $CertErrors++
